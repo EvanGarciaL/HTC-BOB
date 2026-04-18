@@ -28,7 +28,7 @@ export default function Dashboard() {
     observer.observe(gridRef.current);
     return () => observer.disconnect();
   }, []);
-
+/*
   useEffect(() => {
     // Dynamic import to simulate grabbing the file (in Next.js you'd ideally use an API route, but this works purely locally)
     fetch('/api/trends')
@@ -40,21 +40,21 @@ export default function Dashboard() {
         console.error("Using a mock fallback while API routing isn't set up...", e);
       });
   }, []);
-
+*/
   // Use a hack to load the file directly if /api/trends is missing: 
   // Normally we would just wait for the api, but actually I need an API route! Wait, let's just make page.tsx pull data on the server part. 
   // Because it's "use client", I should just use `useEffect` and `fetch`. 
   // Let me just import the JSON directly utilizing Webpack.
   
   useEffect(() => {
-    import('./latest_trends.json')
-    .then((module) => {
-      setData(module.default || module);
+  fetch('/latest_trends.json')
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
     })
-    .catch((err) => {
-      console.error(err);
-    });
-  }, []);
+    .then(data => setData(data))
+    .catch(err => console.error('Failed to load trends:', err));
+}, []);
 
   const trends = data?.trusted_trends || [];
 
