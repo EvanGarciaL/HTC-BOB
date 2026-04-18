@@ -1,17 +1,11 @@
 import os
 import sys
-
+import requests
 from dotenv import load_dotenv
-
-try:
-    import gemini
-except ImportError:  # pragma: no cover - handled at runtime for local setup
-    gemini = None
-
 
 load_dotenv()
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-mini")
+OPENFDA_BASE = "https://api.fda.gov"
 
 # Shared restriction list used by the business-filtering pipeline.
 restriction_list = [
@@ -26,42 +20,71 @@ restriction_list = [
 ]
 
 
-def get_gemini_client():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not set.")
-    if gemini is None:
-        raise RuntimeError(
-            "The Gemini Python package is not installed. Run `python3 -m pip install gemini`."
-        )
-    return gemini
-
-
-def check_fda_restrictions_with_ai(item):
+def check_fda_restrictions_with_api(item: str) -> dict:
     """
-    Ask the model whether an item appears restricted, banned, recalled,
-    or otherwise risky from an FDA/compliance perspective.
+    Search OpenFDA enforcement (recalls) and drug adverse events
+    for any records mentioning the item.
+    Returns a summary dict with hit counts per endpoint.
     """
-    client = get_gemini_client()
-    prompt = f"""
-You are helping a product discovery team perform an FDA and safety risk screen.
+    results = {}
+    endpoints = {
+        "food_enforcement": f"{OPENFDA_BASE}/food/enforcement.json",
+        "drug_enforcement": f"{OPENFDA_BASE}/drug/enforcement.json",
+        "supplement_adverse_events": f"{OPENFDA_BASE}/food/event.json",
+    }
 
-Item: {item}
+    for label, url in endpoints.items():
+        try:
+            resp = requests.get(
+                url,
+                params={"search": item, "limit": 5},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                total = data.get("meta", {}).get("results", {}).get("total", 0)
+                results[label] = {
+                    "total_hits": total,
+                    "sample": [
+                        r.get("reason_for_recall") or r.get("outcomes") or "N/A"
+                        for r in data.get("results", [])[:3]
+                    ],
+                }
+            elif resp.status_code == 404:
+                results[label] = {"total_hits": 0, "sample": []}
+            else:
+                results[label] = {"error": f"HTTP {resp.status_code}"}
+        except requests.RequestException as exc:
+            results[label] = {"error": str(exc)}
 
-Respond in exactly this format:
-Restriction Risk: <yes/no/unclear>
-Reason: <one short sentence>
+    return results
 
-Only say "yes" if the item is commonly known to be banned, recalled, restricted,
-or clearly unsafe for use in a food, beverage, supplement, or consumer product context.
-If the answer depends on formulation or use context, say "unclear".
-"""
 
-    response = client.responses.create(
-        model=GEMINI_MODEL,
-        input=prompt,
+def format_fda_results(item: str, data: dict) -> str:
+    lines = [f"OpenFDA results for '{item}':\n"]
+    any_hits = False
+
+    for endpoint, info in data.items():
+        if "error" in info:
+            lines.append(f"  [{endpoint}] Error: {info['error']}")
+            continue
+
+        total = info["total_hits"]
+        if total > 0:
+            any_hits = True
+        lines.append(f"  [{endpoint}] Total records found: {total}")
+
+        for i, sample in enumerate(info["sample"], 1):
+            if isinstance(sample, list):
+                sample = ", ".join(sample)
+            lines.append(f"    {i}. {sample}")
+
+    lines.append("")
+    lines.append(
+        f"Restriction Risk: {'yes' if any_hits else 'no'} "
+        f"(based on OpenFDA enforcement/adverse event records)"
     )
-    return response.output_text.strip()
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
@@ -72,8 +95,7 @@ if __name__ == "__main__":
     print(f"\nStatic restriction list hit: {item.lower() in restriction_list}\n")
 
     try:
-        ai_result = check_fda_restrictions_with_ai(item)
-        print(f"AI Analysis for FDA Restrictions on '{item}':\n")
-        print(ai_result)
+        raw = check_fda_restrictions_with_api(item)
+        print(format_fda_results(item, raw))
     except Exception as exc:
-        print(f"Unable to run Gemini FDA check: {exc}")
+        print(f"Unable to run OpenFDA check: {exc}")
