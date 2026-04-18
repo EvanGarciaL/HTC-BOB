@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from 'react';
+import trendsData from './latest_trends.json';
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
@@ -46,15 +47,9 @@ export default function Dashboard() {
   // Because it's "use client", I should just use `useEffect` and `fetch`. 
   // Let me just import the JSON directly utilizing Webpack.
   
-  useEffect(() => {
-  fetch('/latest_trends.json')
-    .then(res => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    })
-    .then(data => setData(data))
-    .catch(err => console.error('Failed to load trends:', err));
-}, []);
+    useEffect(() => {
+      setData(trendsData);
+    }, []);
 
   const trends = data?.trusted_trends || [];
 
