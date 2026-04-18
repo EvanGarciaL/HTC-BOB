@@ -1,3 +1,10 @@
+"""
+google_api.py: Google Trends Intelligence Module
+
+This module powers the leading-indicator discovery pipeline by scraping Google Trends data via `pytrends`.
+It identifies emerging search momentum, classifies intent (e.g. 'commercial_demand' vs 'consumer_education'),
+and calculates an overall opportunity score to highlight early-stage trend trajectories.
+"""
 from pytrends.request import TrendReq
 import pandas as pd
 from food_terms import (

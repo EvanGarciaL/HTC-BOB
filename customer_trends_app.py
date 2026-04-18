@@ -1,3 +1,10 @@
+"""
+customer_trends_app.py: Dashboard Prototype Presentation Layer
+
+This module serves as the primary presentation layer for the buyer's team.
+It provides a local HTTP server rendering a dynamic, interactive dashboard (HTML/CSS/JS)
+to visualize compiled scores, filtering constraints, and actionable opportunity cards.
+"""
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse

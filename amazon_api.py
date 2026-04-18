@@ -1,3 +1,10 @@
+"""
+amazon_api.py: Amazon Product Discovery & Validation Module
+
+This module is responsible for querying Amazon search data via the Rainforest API to validate
+product trends against actual consumer purchasing behavior. It includes functions to rank products
+by computing 'trend velocity' based on Best Sellers Ranks (BSR) and 'popularity' based on review counts.
+"""
 import os
 
 import pandas as pd

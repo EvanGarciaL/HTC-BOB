@@ -1,3 +1,9 @@
+"""
+temporary_demo_data.py: Mock Data Provider
+
+Provides mock API responses for Google Trends and Amazon Bestsellers to allow offline
+development and UI testing without consuming API credits or requiring network connectivity.
+"""
 TEMPORARY_GOOGLE_TRENDS_RECORDS = [
     {
         "query": "matcha gummies",

@@ -1,3 +1,9 @@
+"""
+restriction_list.py: FDA & Import Compliance List
+
+This module checks emerging trends against a hardcoded restriction list and queries
+the OpenFDA API to calculate a business risk score, effectively rejecting non-compliant ingredients.
+"""
 import os
 import sys
 import requests

@@ -1,3 +1,10 @@
+"""
+combined_trends.py: Aggregation and Compliance Engine Module
+
+This module merges the leading trends from Google with trailing commercial validation from Amazon.
+Crucially, it acts as the business filter logic pipeline: assessing product shelf life viability,
+categorizing product types, and cross-referencing against FDA/Import restriction lists.
+"""
 import pandas as pd
 
 from amazon_api import build_amazon_trends_payload

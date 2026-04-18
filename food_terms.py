@@ -1,3 +1,9 @@
+"""
+food_terms.py: Knowledge Base & Vocabulary Module
+
+This module acts as a static knowledge base of seed keywords, food formats, and ingredient terminologies.
+These lists are used to seed search APIs and categorize the unstructured data returned from trend sources.
+"""
 DISCOVERY_SEED_KEYWORDS = [
     "tea",
     "snack",
