@@ -47,7 +47,7 @@ export default function Dashboard() {
   // Let me just import the JSON directly utilizing Webpack.
   
   useEffect(() => {
-    import('../../../latest_trends.json')
+    import('./latest_trends.json')
     .then((module) => {
       setData(module.default || module);
     })
