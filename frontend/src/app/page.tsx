@@ -480,8 +480,8 @@ export default function Dashboard() {
                     }}
                   >
                     <div className="card-top">
-                      <h2 className="card-term" style={{ textTransform: "capitalize" }}>{record.term}</h2>
-                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                      <h2 className="card-term" style={{ textTransform: "capitalize", paddingRight: "8px", wordBreak: "break-word" }}>{record.term}</h2>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end", flexShrink: 0 }}>
                         <span className="status-badge" style={{ background: "#f8f1e8", color: "#766759" }}>
                           Trust: {trust.total_score ?? "—"}
                         </span>
