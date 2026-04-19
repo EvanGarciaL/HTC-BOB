@@ -1,26 +1,184 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from 'react';
-import trendsData from './latest_trends.json';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import trendsData from "./latest_trends.json";
+
+const ITEMS_PER_PAGE = 50;
+
+const SORT_OPTIONS = [
+  { id: "featured", label: "Featured" },
+  { id: "alpha-asc", label: "A → Z" },
+  { id: "alpha-desc", label: "Z → A" },
+  { id: "google-desc", label: "Search demand ↑" },
+  { id: "google-asc", label: "Search demand ↓" },
+  { id: "amazon-desc", label: "Shopping demand ↑" },
+  { id: "amazon-asc", label: "Shopping demand ↓" },
+  { id: "trust-desc", label: "Trust score ↑" },
+  { id: "trust-asc", label: "Trust score ↓" },
+  { id: "ready-first", label: "Ready first" },
+] as const;
+
+const HELP_CONTENT: Record<
+  string,
+  { title: string; meaning: string; calculation: string }
+> = {
+  trajectory: {
+    title: "Trajectory (Velocity)",
+    meaning: "How quickly the trend is gaining momentum across the signals we track.",
+    calculation:
+      "Built from the Google opportunity signal and Amazon opportunity signal, then scaled into the 30-point trajectory bucket.",
+  },
+  uniqueness: {
+    title: "Uniqueness (Whitespace)",
+    meaning: "How open the market still looks for this idea compared with more crowded concepts.",
+    calculation:
+      "Taken from the whitespace estimate in the trust scoring logic, then scaled into the 20-point uniqueness bucket.",
+  },
+  sourcing: {
+    title: "Sourcing Feasibility",
+    meaning: "How realistic it is to source, manufacture, and support consistently.",
+    calculation:
+      "Pulled directly from the sourcing feasibility score and capped at 15 points in the trust model.",
+  },
+  translation: {
+    title: "Market Translation",
+    meaning: "How easily the trend can turn into a product consumers immediately understand and want.",
+    calculation:
+      "Pulled directly from the translation-to-market score and capped at 15 points in the trust model.",
+  },
+  risk: {
+    title: "FDA & Shelf-life",
+    meaning: "How cleanly the item passes shelf-life and restricted-ingredient checks.",
+    calculation:
+      "Based on the compliance and shelf-stability checks in the trust model, then scaled into the 20-point risk bucket.",
+  },
+};
+
+function formatLabel(value: string | null | undefined) {
+  if (!value) return "";
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getMetricColor(ratio: number) {
+  if (ratio <= 0.2) return "#d14f45";
+  if (ratio <= 0.4) return "#df7a3f";
+  if (ratio <= 0.6) return "#d9ad34";
+  if (ratio <= 0.8) return "#92b765";
+  return "#2f8b57";
+}
+
+function ScoreSquares({
+  value,
+  max,
+}: {
+  value: number;
+  max: number;
+}) {
+  const safeMax = max || 1;
+  const ratio = Math.max(0, Math.min(value / safeMax, 1));
+  const fill = ratio * 5;
+  const color = getMetricColor(ratio);
+
+  return (
+    <div className="score-squares" aria-hidden="true">
+      {Array.from({ length: 5 }).map((_, index) => {
+        const squareFill = Math.max(0, Math.min(fill - index, 1));
+        return (
+          <span className="score-square-shell" key={index}>
+            <span
+              className="score-square-fill"
+              style={{
+                width: `${squareFill * 100}%`,
+                background: color,
+              }}
+            />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function HelpButton({
+  metricKey,
+  activeMetric,
+  onToggle,
+}: {
+  metricKey: string;
+  activeMetric: string | null;
+  onToggle: (metricKey: string) => void;
+}) {
+  const isOpen = activeMetric === metricKey;
+  const content = HELP_CONTENT[metricKey];
+
+  return (
+    <div className="help-wrap">
+      <button
+        type="button"
+        className="help-button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onToggle(metricKey);
+        }}
+        aria-label={`About ${content.title}`}
+      >
+        ?
+      </button>
+      {isOpen && (
+        <div className="help-popup" onClick={(event) => event.stopPropagation()}>
+          <div className="help-popup-title">{content.title}</div>
+          <div className="help-popup-block">
+            <div className="help-popup-label">Meaning</div>
+            <p className="help-popup-copy">{content.meaning}</p>
+          </div>
+          <div className="help-popup-block">
+            <div className="help-popup-label">Calculation</div>
+            <div className="help-popup-equation">{content.calculation}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
-  const [format, setFormat] = useState('');
-  const [source, setSource] = useState('');
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [format, setFormat] = useState("");
+  const [source, setSource] = useState("");
   const [passingOnly, setPassingOnly] = useState(false);
-  const [sortKey, setSortKey] = useState('default');
-  
+  const [sortKey, setSortKey] = useState<string>("featured");
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
+  const [activeHelpMetric, setActiveHelpMetric] = useState<string | null>(null);
   const [cols, setCols] = useState(3);
+  const [insightModal, setInsightModal] = useState<{
+    type: "recommendations" | "competitors";
+    term: string;
+    category: string;
+  } | null>(null);
+  const [insightState, setInsightState] = useState<{
+    loading: boolean;
+    error: string | null;
+    competitors: string[];
+    recommendations: string[];
+  }>({
+    loading: false,
+    error: null,
+    competitors: [],
+    recommendations: [],
+  });
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!gridRef.current) return;
     const observer = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        // Calculation matching CSS grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) with 16px gap
+      for (const entry of entries) {
         const containerWidth = entry.contentRect.width;
         const calculatedCols = Math.floor((containerWidth + 16) / (320 + 16)) || 1;
         setCols(calculatedCols);
@@ -29,69 +187,141 @@ export default function Dashboard() {
     observer.observe(gridRef.current);
     return () => observer.disconnect();
   }, []);
-/*
+
   useEffect(() => {
-    // Dynamic import to simulate grabbing the file (in Next.js you'd ideally use an API route, but this works purely locally)
-    fetch('/api/trends')
-      .then(res => {
-        // We will just create an API route to read the file so it works seamlessly inside Next.js
-        return res.json();
-      })
-      .catch(e => {
-        console.error("Using a mock fallback while API routing isn't set up...", e);
-      });
+    setData(trendsData);
   }, []);
-*/
-  // Use a hack to load the file directly if /api/trends is missing: 
-  // Normally we would just wait for the api, but actually I need an API route! Wait, let's just make page.tsx pull data on the server part. 
-  // Because it's "use client", I should just use `useEffect` and `fetch`. 
-  // Let me just import the JSON directly utilizing Webpack.
-  
-    useEffect(() => {
-      setData(trendsData);
-    }, []);
 
   const trends = data?.trusted_trends || [];
 
-  // Derived filters
-  const categories = Array.from(new Set(trends.map((r: any) => r.business_filter?.category).filter(Boolean))).sort() as string[];
-  const formats = Array.from(new Set(trends.map((r: any) => r.business_filter?.product_format).filter(Boolean))).sort() as string[];
+  const categories = useMemo(
+    () =>
+      Array.from(
+        new Set(trends.map((record: any) => record.business_filter?.category).filter(Boolean)),
+      ).sort() as string[],
+    [trends],
+  );
 
-  const withGoogle = trends.filter((r: any) => r.google_trends).length;
-  const withAmazon = trends.filter((r: any) => r.amazon_trends).length;
-  const passing = trends.filter((r: any) => r.business_filter?.passes).length;
+  const formats = useMemo(
+    () =>
+      Array.from(
+        new Set(trends.map((record: any) => record.business_filter?.product_format).filter(Boolean)),
+      ).sort() as string[],
+    [trends],
+  );
 
-  const matchesSource = (record: any, value: string) => {
-    if (!value) return true;
-    const g = Boolean(record.google_trends);
-    const a = Boolean(record.amazon_trends);
-    if (value === "both") return g && a;
-    if (value === "google") return g && !a;
-    if (value === "amazon") return a && !g;
-    return true;
-  };
+  const withGoogle = trends.filter((record: any) => record.google_trends).length;
+  const withAmazon = trends.filter((record: any) => record.amazon_trends).length;
+  const passing = trends.filter((record: any) => record.business_filter?.passes).length;
 
-  let filteredRecords = trends.filter((r: any) => {
-    const term = (r.term || "").toLowerCase();
-    return (!search || term.includes(search.toLowerCase()))
-        && (!category || r.business_filter?.category === category)
-        && (!format || r.business_filter?.product_format === format)
-        && (!passingOnly || r.business_filter?.passes)
-        && matchesSource(r, source);
-  });
+  const filteredRecords = useMemo(() => {
+    const matchesSource = (record: any) => {
+      if (!source) return true;
+      const hasGoogle = Boolean(record.google_trends);
+      const hasAmazon = Boolean(record.amazon_trends);
+      if (source === "both") return hasGoogle && hasAmazon;
+      if (source === "google") return hasGoogle && !hasAmazon;
+      if (source === "amazon") return hasAmazon && !hasGoogle;
+      return true;
+    };
 
-  const getG = (r: any) => r.combined_signals?.google_opportunity_score ?? -1;
-  const getA = (r: any) => r.combined_signals?.amazon_opportunity_score ?? -1;
+    const getGoogle = (record: any) => record.combined_signals?.google_opportunity_score ?? -1;
+    const getAmazon = (record: any) => record.combined_signals?.amazon_opportunity_score ?? -1;
+    const getTrust = (record: any) => record.trust_breakdown?.total_score ?? -1;
 
-  if (sortKey === "alpha-asc") filteredRecords.sort((a: any, b: any) => a.term.localeCompare(b.term));
-  if (sortKey === "alpha-desc") filteredRecords.sort((a: any, b: any) => b.term.localeCompare(a.term));
-  if (sortKey === "google-desc") filteredRecords.sort((a: any, b: any) => getG(b) - getG(a));
-  if (sortKey === "google-asc") filteredRecords.sort((a: any, b: any) => getG(a) - getG(b));
-  if (sortKey === "amazon-desc") filteredRecords.sort((a: any, b: any) => getA(b) - getA(a));
-  if (sortKey === "amazon-asc") filteredRecords.sort((a: any, b: any) => getA(a) - getA(b));
-  if (sortKey === "ready-first") filteredRecords.sort((a: any, b: any) => {
-    return (b.business_filter?.passes ? 1 : 0) - (a.business_filter?.passes ? 1 : 0);
-  });
+    const records = trends.filter((record: any) => {
+      const term = String(record.term || "").toLowerCase();
+      return (
+        (!search || term.includes(search.toLowerCase())) &&
+        (!category || record.business_filter?.category === category) &&
+        (!format || record.business_filter?.product_format === format) &&
+        (!passingOnly || record.business_filter?.passes) &&
+        matchesSource(record)
+      );
+    });
+
+    records.sort((a: any, b: any) => {
+      if (sortKey === "alpha-asc") return a.term.localeCompare(b.term);
+      if (sortKey === "alpha-desc") return b.term.localeCompare(a.term);
+      if (sortKey === "google-desc") return getGoogle(b) - getGoogle(a);
+      if (sortKey === "google-asc") return getGoogle(a) - getGoogle(b);
+      if (sortKey === "amazon-desc") return getAmazon(b) - getAmazon(a);
+      if (sortKey === "amazon-asc") return getAmazon(a) - getAmazon(b);
+      if (sortKey === "trust-desc") return getTrust(b) - getTrust(a);
+      if (sortKey === "trust-asc") return getTrust(a) - getTrust(b);
+      if (sortKey === "ready-first") {
+        return Number(Boolean(b.business_filter?.passes)) - Number(Boolean(a.business_filter?.passes));
+      }
+      return getTrust(b) - getTrust(a);
+    });
+
+    return records;
+  }, [trends, search, category, format, source, passingOnly, sortKey]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+    setSelectedCardId(null);
+    setActiveHelpMetric(null);
+  }, [search, category, format, source, passingOnly, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRecords.length / ITEMS_PER_PAGE));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const pageStartIndex = (currentPageSafe - 1) * ITEMS_PER_PAGE;
+  const pageRecords = filteredRecords.slice(pageStartIndex, pageStartIndex + ITEMS_PER_PAGE);
+
+  const selectedRecord = selectedCardId !== null ? pageRecords[selectedCardId] : null;
+
+  function formatSignalValue(value: number | null | undefined) {
+    if (value === null || value === undefined || Number.isNaN(value)) return "—";
+    return Number(value).toFixed(1);
+  }
+
+  function signalTone(value: number | null | undefined) {
+    if (value === null || value === undefined || Number.isNaN(value)) return "muted";
+    if (value >= 80) return "high";
+    if (value >= 60) return "medium";
+    return "low";
+  }
+
+  async function openInsightModal(type: "recommendations" | "competitors", record: any) {
+    setInsightModal({
+      type,
+      term: record.term,
+      category: record.business_filter?.category || "uncategorized",
+    });
+
+    const fallback = record.product_insights || {};
+    setInsightState({
+      loading: true,
+      error: null,
+      competitors: fallback.competitors || [],
+      recommendations: fallback.recommendations || [],
+    });
+
+    try {
+      const query = new URLSearchParams({
+        term: record.term,
+        category: record.business_filter?.category || "uncategorized",
+      });
+      const response = await fetch(`/api/product-insights?${query.toString()}`);
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to fetch product insights.");
+      }
+      setInsightState({
+        loading: false,
+        error: null,
+        competitors: payload.competitors || [],
+        recommendations: payload.recommendations || [],
+      });
+    } catch (error) {
+      setInsightState((current) => ({
+        ...current,
+        loading: false,
+        error: error instanceof Error ? error.message : "Unable to fetch product insights.",
+      }));
+    }
+  }
 
   return (
     <>
@@ -104,9 +334,11 @@ export default function Dashboard() {
       <div className="hero">
         <div className="hero-inner">
           <span className="hero-eyebrow">Market Intelligence</span>
-          <h1>What's <em>growing</em> right now</h1>
+          <h1>
+            What&apos;s <em>growing</em> right now
+          </h1>
           <p className="hero-sub">
-            Real consumer demand signals from Google and Amazon — filtered for food and wellness opportunities you can act on today.
+            Real consumer demand signals from Google and Amazon, filtered into product opportunities your team can evaluate quickly.
           </p>
           <div className="stats">
             <article className="stat">
@@ -132,45 +364,78 @@ export default function Dashboard() {
       <div className="shell">
         <aside className="sidebar">
           <div className="sidebar-title">Find opportunities</div>
-          <p className="sidebar-sub">Narrow results by what matters to your buying decision.</p>
+          <p className="sidebar-sub">Narrow results by the signals that matter most to your buying decision.</p>
 
           <div className="field">
             <label>Keyword</label>
-            <input type="text" placeholder="e.g. matcha, probiotic…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input
+              type="text"
+              placeholder="e.g. matcha, probiotic..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
           </div>
+
           <div className="field">
             <label>Category</label>
-            <select value={category} onChange={e => setCategory(e.target.value)}>
+            <select value={category} onChange={(event) => setCategory(event.target.value)}>
               <option value="">All categories</option>
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              {categories.map((value) => (
+                <option key={value} value={value}>
+                  {formatLabel(value)}
+                </option>
+              ))}
             </select>
           </div>
+
           <div className="field">
-            <label>Product type</label>
-            <select value={format} onChange={e => setFormat(e.target.value)}>
+            <label>Product Type</label>
+            <select value={format} onChange={(event) => setFormat(event.target.value)}>
               <option value="">All types</option>
-              {formats.map(f => <option key={f} value={f}>{f}</option>)}
+              {formats.map((value) => (
+                <option key={value} value={value}>
+                  {formatLabel(value)}
+                </option>
+              ))}
             </select>
           </div>
+
           <div className="field">
-            <label>Signal source</label>
-            <select value={source} onChange={e => setSource(e.target.value)}>
+            <label>Signal Source</label>
+            <select value={source} onChange={(event) => setSource(event.target.value)}>
               <option value="">All signals</option>
               <option value="both">Google + Amazon</option>
               <option value="google">Google only</option>
               <option value="amazon">Amazon only</option>
             </select>
           </div>
+
           <label className="toggle-row">
-            <input type="checkbox" checked={passingOnly} onChange={e => setPassingOnly(e.target.checked)} />
-            <span>Show only <strong>ready opportunities</strong> — trends that meet all business criteria</span>
+            <input
+              type="checkbox"
+              checked={passingOnly}
+              onChange={(event) => setPassingOnly(event.target.checked)}
+            />
+            <span>
+              Show only <strong>ready opportunities</strong>
+            </span>
           </label>
 
-          <div className="divider"></div>
+          <div className="divider" />
+
           <div className="legend">
-            <div className="legend-item"><span className="legend-dot" style={{background:'var(--green)'}}></span> Ready opportunity</div>
-            <div className="legend-item"><span className="legend-dot" style={{background:'var(--soft)'}}></span> Monitoring / not yet ready</div>
-            <div className="legend-item"><span className="legend-dot" style={{background:'var(--accent)'}}></span> Score 70+ = strong signal</div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ background: "var(--green)" }} />
+              Ready opportunity
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ background: "var(--soft)" }} />
+              Monitoring
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot" style={{ background: "var(--accent)" }} />
+              Strong trust score
+            </div>
           </div>
         </aside>
 
@@ -179,118 +444,234 @@ export default function Dashboard() {
             <div className="main-title">Trend Opportunities</div>
             <div className="result-count">{filteredRecords.length} results</div>
           </div>
-          <div className="sort-bar" style={{marginBottom: "18px"}}>
-            <span className="sort-label">Sort by</span>
-            {[
-              { id: 'default', label: 'Featured' },
-              { id: 'alpha-asc', label: 'A → Z' },
-              { id: 'alpha-desc', label: 'Z → A' },
-              { id: 'google-desc', label: 'Search demand ↑' },
-              { id: 'google-asc', label: 'Search demand ↓' },
-              { id: 'amazon-desc', label: 'Shopping demand ↑' },
-              { id: 'amazon-asc', label: 'Shopping demand ↓' },
-              { id: 'ready-first', label: 'Ready first' },
-            ].map(s => (
-              <button 
-                key={s.id} 
-                className={`sort-btn ${sortKey === s.id ? 'active' : ''}`}
-                onClick={() => setSortKey(s.id)}
+
+          <div className="sort-bar">
+            <span className="sort-label">Sort By</span>
+            {SORT_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={`sort-btn ${sortKey === option.id ? "active" : ""}`}
+                onClick={() => setSortKey(option.id)}
               >
-                {s.label}
+                {option.label}
               </button>
             ))}
           </div>
 
+          <div className="page-range">
+            Showing {filteredRecords.length === 0 ? 0 : pageStartIndex + 1}-
+            {Math.min(pageStartIndex + ITEMS_PER_PAGE, filteredRecords.length)} of {filteredRecords.length}
+          </div>
+
           <div className="card-grid" ref={gridRef}>
-            {filteredRecords.map((record: any, idx: number) => {
-              const pass = record.business_filter?.passes;
-              const tr = record.trust_breakdown || {};
-              const total = tr.total_score || 0;
+            {pageRecords.map((record: any, idx: number) => {
+              const trust = record.trust_breakdown || {};
+              const passed = Boolean(record.business_filter?.passes);
               const isSelected = selectedCardId === idx;
-              
-              // Calculate if we should render the drawer AFTER this item
-              const isDrawerTarget = selectedCardId !== null 
-                  && idx === Math.min((Math.floor(selectedCardId / cols) + 1) * cols - 1, filteredRecords.length - 1);
-              
-              const activeRecord = selectedCardId !== null ? filteredRecords[selectedCardId] : null;
-              const activeTr = activeRecord?.trust_breakdown || {};
+              const googleScore = record.combined_signals?.google_opportunity_score ?? null;
+              const amazonScore = record.combined_signals?.amazon_opportunity_score ?? null;
+              const isDrawerTarget =
+                selectedCardId !== null &&
+                idx === Math.min((Math.floor(selectedCardId / cols) + 1) * cols - 1, pageRecords.length - 1);
+              const activeRecord = selectedCardId !== null ? pageRecords[selectedCardId] : null;
+              const activeTrust = activeRecord?.trust_breakdown || {};
               const activePass = activeRecord?.business_filter?.passes;
 
               return (
-                <React.Fragment key={idx}>
-                  <article 
-                    className={`opportunity-card ${pass ? 'pass' : 'fail'} ${isSelected ? 'selected' : ''}`}
-                    onClick={() => setSelectedCardId(isSelected ? null : idx)}
+                <React.Fragment key={record.term}>
+                  <article
+                    className={`opportunity-card ${passed ? "pass" : "fail"} ${isSelected ? "selected" : ""}`}
+                    onClick={() => {
+                      setSelectedCardId(isSelected ? null : idx);
+                      setActiveHelpMetric(null);
+                    }}
                   >
-                  <div className="card-top">
-                    <h2 className="card-term">{record.term}</h2>
-                    <span className={`badge ${pass ? 'pass' : 'fail'}`}>
-                      {total} T.R.U.S.T
-                    </span>
-                  </div>
+                    <div className="card-top">
+                      <h2 className="card-term">{record.term}</h2>
+                      <span className={`status-badge ${passed ? "ready" : "watching"}`}>
+                        {passed ? "Ready" : "Watching"}
+                      </span>
+                    </div>
 
-                  <div className="card-meta">
-                    {record.business_filter?.category && <span className="tag">{record.business_filter.category}</span>}
-                    {record.business_filter?.product_format && <span className="tag">{record.business_filter.product_format}</span>}
-                  </div>
+                    <div className="card-meta">
+                      {record.business_filter?.category && (
+                        <span className="tag">{formatLabel(record.business_filter.category)}</span>
+                      )}
+                      {record.business_filter?.product_format && (
+                        <span className="tag">{formatLabel(record.business_filter.product_format)}</span>
+                      )}
+                    </div>
+
+                    <div className="signal-grid">
+                      <div className="signal-card">
+                        <div className="signal-label">Search Demand</div>
+                        <div className={`signal-value ${signalTone(googleScore)}`}>
+                          {formatSignalValue(googleScore)}
+                        </div>
+                      </div>
+                      <div className="signal-card">
+                        <div className="signal-label">Shopping Demand</div>
+                        <div className={`signal-value ${signalTone(amazonScore)}`}>
+                          {formatSignalValue(amazonScore)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="source-row">
+                      <span className={`source-pill ${record.google_trends ? "active" : ""}`}>Google</span>
+                      <span className={`source-pill ${record.amazon_trends ? "active" : ""}`}>Amazon</span>
+                    </div>
                   </article>
 
                   {isDrawerTarget && activeRecord && (
-                    <div className="detail-drawer" style={{ gridColumn: '1 / -1', margin: '0 0 16px 0' }}>
-                       <div className="drawer-header">
-                         <h3 className="drawer-term">{activeRecord.term}</h3>
-                         <button className="drawer-close" onClick={() => setSelectedCardId(null)}>×</button>
-                       </div>
-                       
-                       <div className="drawer-body">
-                          <div className="drawer-section">
-                            <h4 className="drawer-section-title">Breakdown</h4>
+                    <div className="detail-drawer inline-drawer" style={{ gridColumn: "1 / -1" }}>
+                      <div className="drawer-header">
+                        <h3 className="drawer-term">{activeRecord.term}</h3>
+                        <button type="button" className="drawer-close" onClick={() => setSelectedCardId(null)}>
+                          ×
+                        </button>
+                      </div>
+
+                      <div className="drawer-body">
+                        <div className="drawer-section">
+                          <h4 className="drawer-section-title">Breakdown</h4>
+
+                          <div className="drawer-metric">
                             <div className="drawer-row">
-                              <span className="drawer-row-label">Trajectory (Velocity)</span>
-                              <span className="drawer-row-value">{activeTr.trajectory_30} / 30</span>
+                              <span className="drawer-row-label">
+                                Trajectory (Velocity)
+                                <HelpButton
+                                  metricKey="trajectory"
+                                  activeMetric={activeHelpMetric}
+                                  onToggle={(metricKey) =>
+                                    setActiveHelpMetric((current) => (current === metricKey ? null : metricKey))
+                                  }
+                                />
+                              </span>
+                              <span className="drawer-row-value">
+                                {activeTrust.trajectory_30 ?? 0} / 30
+                              </span>
                             </div>
-                            <div className="drawer-row">
-                              <span className="drawer-row-label">Uniqueness (Whitespace)</span>
-                              <span className="drawer-row-value">{activeTr.uniqueness_20} / 20</span>
-                            </div>
-                          </div>
-                          
-                          <div className="drawer-section">
-                            <h4 className="drawer-section-title">Business Fit</h4>
-                            <div className="drawer-row">
-                              <span className="drawer-row-label">Sourcing Feasibility</span>
-                              <span className="drawer-row-value">{activeTr.sourcing_15} / 15</span>
-                            </div>
-                            <div className="drawer-row">
-                              <span className="drawer-row-label">Market Translation</span>
-                              <span className="drawer-row-value">{activeTr.translation_15} / 15</span>
-                            </div>
+                            <ScoreSquares value={activeTrust.trajectory_30 ?? 0} max={30} />
                           </div>
 
-                          <div className="drawer-section">
-                            <h4 className="drawer-section-title">Risk Assessment</h4>
+                          <div className="drawer-metric">
                             <div className="drawer-row">
-                              <span className="drawer-row-label">FDA & Shelf-life (+20)</span>
-                              <span className={`drawer-row-value ${activePass ? 'high' : ''}`}>
-                                {activeTr.risk_20} / 20
+                              <span className="drawer-row-label">
+                                Uniqueness (Whitespace)
+                                <HelpButton
+                                  metricKey="uniqueness"
+                                  activeMetric={activeHelpMetric}
+                                  onToggle={(metricKey) =>
+                                    setActiveHelpMetric((current) => (current === metricKey ? null : metricKey))
+                                  }
+                                />
+                              </span>
+                              <span className="drawer-row-value">
+                                {activeTrust.uniqueness_20 ?? 0} / 20
                               </span>
                             </div>
-                            <div className="drawer-row">
-                              <span className="drawer-row-label">Agent Notes</span>
-                              <span className="agent-notes">
-                                {activeTr.risk_notes || (activePass ? "Cleared constraints." : "Flagged compliance issue.")}
-                              </span>
-                            </div>
+                            <ScoreSquares value={activeTrust.uniqueness_20 ?? 0} max={20} />
                           </div>
-                       </div>
+                        </div>
+
+                        <div className="drawer-section">
+                          <h4 className="drawer-section-title">Business Fit</h4>
+
+                          <div className="drawer-metric">
+                            <div className="drawer-row">
+                              <span className="drawer-row-label">
+                                Sourcing Feasibility
+                                <HelpButton
+                                  metricKey="sourcing"
+                                  activeMetric={activeHelpMetric}
+                                  onToggle={(metricKey) =>
+                                    setActiveHelpMetric((current) => (current === metricKey ? null : metricKey))
+                                  }
+                                />
+                              </span>
+                              <span className="drawer-row-value">
+                                {activeTrust.sourcing_15 ?? 0} / 15
+                              </span>
+                            </div>
+                            <ScoreSquares value={activeTrust.sourcing_15 ?? 0} max={15} />
+                          </div>
+
+                          <div className="drawer-metric">
+                            <div className="drawer-row">
+                              <span className="drawer-row-label">
+                                Market Translation
+                                <HelpButton
+                                  metricKey="translation"
+                                  activeMetric={activeHelpMetric}
+                                  onToggle={(metricKey) =>
+                                    setActiveHelpMetric((current) => (current === metricKey ? null : metricKey))
+                                  }
+                                />
+                              </span>
+                              <span className="drawer-row-value">
+                                {activeTrust.translation_15 ?? 0} / 15
+                              </span>
+                            </div>
+                            <ScoreSquares value={activeTrust.translation_15 ?? 0} max={15} />
+                          </div>
+                        </div>
+
+                        <div className="drawer-section">
+                          <h4 className="drawer-section-title">Risk Assessment</h4>
+
+                          <div className="drawer-metric">
+                            <div className="drawer-row">
+                              <span className="drawer-row-label">
+                                FDA & Shelf-life (+20)
+                                <HelpButton
+                                  metricKey="risk"
+                                  activeMetric={activeHelpMetric}
+                                  onToggle={(metricKey) =>
+                                    setActiveHelpMetric((current) => (current === metricKey ? null : metricKey))
+                                  }
+                                />
+                              </span>
+                              <span className={`drawer-row-value ${activePass ? "high" : ""}`}>
+                                {activeTrust.risk_20 ?? 0} / 20
+                              </span>
+                            </div>
+                            <ScoreSquares value={activeTrust.risk_20 ?? 0} max={20} />
+                          </div>
+
+                          <div className="drawer-row notes-inline">
+                            <span className="drawer-row-label">Agent Notes</span>
+                            <span className="agent-notes">
+                              {activeTrust.risk_notes || (activePass ? "Cleared constraints." : "Flagged compliance issue.")}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="drawer-links">
+                        <button
+                          type="button"
+                          className="drawer-link"
+                          onClick={() => openInsightModal("recommendations", activeRecord)}
+                        >
+                          Product Recommendations
+                        </button>
+                        <button
+                          type="button"
+                          className="drawer-link"
+                          onClick={() => openInsightModal("competitors", activeRecord)}
+                        >
+                          Product Competitors
+                        </button>
+                      </div>
                     </div>
                   )}
-
                 </React.Fragment>
               );
             })}
           </div>
-          
+
           {filteredRecords.length === 0 && (
             <div className="empty">
               <div className="empty-icon">🔍</div>
@@ -298,8 +679,87 @@ export default function Dashboard() {
               <p>Try adjusting your filters or search terms.</p>
             </div>
           )}
+
+          {filteredRecords.length > ITEMS_PER_PAGE && (
+            <div className="pagination">
+              <button
+                type="button"
+                className="page-btn"
+                disabled={currentPageSafe === 1}
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              >
+                Previous
+              </button>
+              <div className="page-list">
+                {Array.from({ length: totalPages }).map((_, index) => {
+                  const page = index + 1;
+                  return (
+                    <button
+                      type="button"
+                      key={page}
+                      className={`page-number ${page === currentPageSafe ? "active" : ""}`}
+                      onClick={() => setCurrentPage(page)}
+                    >
+                      {page}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="page-btn"
+                disabled={currentPageSafe === totalPages}
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </main>
       </div>
+
+      {insightModal && (
+        <div className="modal-backdrop" onClick={() => setInsightModal(null)}>
+          <div className="modal-window" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-kicker">{insightModal.term}</div>
+                <h3 className="modal-title">
+                  {insightModal.type === "recommendations" ? "Product Recommendations" : "Product Competitors"}
+                </h3>
+              </div>
+              <button type="button" className="drawer-close" onClick={() => setInsightModal(null)}>
+                ×
+              </button>
+            </div>
+
+            {insightState.loading && <div className="modal-message">Loading...</div>}
+            {!insightState.loading && insightState.error && (
+              <div className="modal-message">{insightState.error}</div>
+            )}
+
+            {!insightState.loading && !insightState.error && (
+              <div className="modal-list">
+                {(insightModal.type === "recommendations"
+                  ? insightState.recommendations
+                  : insightState.competitors
+                ).length > 0 ? (
+                  (insightModal.type === "recommendations"
+                    ? insightState.recommendations
+                    : insightState.competitors
+                  ).map((item, index) => (
+                    <div className="modal-list-item" key={`${item}-${index}`}>
+                      {item}
+                    </div>
+                  ))
+                ) : (
+                  <div className="modal-message">No information yet.</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
