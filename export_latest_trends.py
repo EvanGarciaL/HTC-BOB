@@ -161,7 +161,11 @@ def main():
         amazon_max_keywords=100,
         use_temporary_demo_data=True,
     )
-    enriched_records = [enrich_record(record, insights_cache) for record in records]
+    print(f"\n[INFO] Starting AI processing for {len(records)} records. The Google API may take 30-60s to detect quota/availability issues. Please do not close...")
+    enriched_records = []
+    for i, record in enumerate(records):
+        print(f"Processing {i+1}/{len(records)}: {record['term']}")
+        enriched_records.append(enrich_record(record, insights_cache))
     save_insights_cache(insights_cache)
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),

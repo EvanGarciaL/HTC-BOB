@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "python3 ../export_latest_trends.py",
+    "predev": "python ../export_latest_trends.py",
     "dev": "next dev",
-    "prebuild": "python3 ../export_latest_trends.py",
+    "prebuild": "python ../export_latest_trends.py",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
