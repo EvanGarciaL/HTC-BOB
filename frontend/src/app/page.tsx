@@ -327,7 +327,7 @@ export default function Dashboard() {
     <>
       <div className="topbar">
         <span className="topbar-brand">Prince of Peace</span>
-        <span>Opportunity Intelligence</span>
+        <span>BOB: Best of Buyers</span>
         <span className="topbar-tag">Live Data</span>
       </div>
 
@@ -342,16 +342,8 @@ export default function Dashboard() {
           </p>
           <div className="stats">
             <article className="stat">
-              <div className="stat-label">Trends Tracked</div>
+              <div className="stat-label">Google/Amazon Signals</div>
               <div className="stat-value">{trends.length}</div>
-            </article>
-            <article className="stat">
-              <div className="stat-label">Google Signals</div>
-              <div className="stat-value">{withGoogle}</div>
-            </article>
-            <article className="stat">
-              <div className="stat-label">Amazon Signals</div>
-              <div className="stat-value">{withAmazon}</div>
             </article>
             <article className="stat">
               <div className="stat-label">Ready Opportunities</div>
@@ -488,10 +480,15 @@ export default function Dashboard() {
                     }}
                   >
                     <div className="card-top">
-                      <h2 className="card-term">{record.term}</h2>
-                      <span className={`status-badge ${passed ? "ready" : "watching"}`}>
-                        {passed ? "Ready" : "Watching"}
-                      </span>
+                      <h2 className="card-term" style={{ textTransform: "capitalize" }}>{record.term}</h2>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                        <span className="status-badge" style={{ background: "#f8f1e8", color: "#766759" }}>
+                          Trust: {trust.total_score ?? "—"}
+                        </span>
+                        <span className={`status-badge ${passed ? "ready" : "watching"}`}>
+                          {passed ? "Ready" : "Watching"}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="card-meta">
@@ -518,16 +515,12 @@ export default function Dashboard() {
                       </div>
                     </div>
 
-                    <div className="source-row">
-                      <span className={`source-pill ${record.google_trends ? "active" : ""}`}>Google</span>
-                      <span className={`source-pill ${record.amazon_trends ? "active" : ""}`}>Amazon</span>
-                    </div>
                   </article>
 
                   {isDrawerTarget && activeRecord && (
                     <div className="detail-drawer inline-drawer" style={{ gridColumn: "1 / -1" }}>
                       <div className="drawer-header">
-                        <h3 className="drawer-term">{activeRecord.term}</h3>
+                        <h3 className="drawer-term" style={{ textTransform: "capitalize" }}>{activeRecord.term}</h3>
                         <button type="button" className="drawer-close" onClick={() => setSelectedCardId(null)}>
                           ×
                         </button>
@@ -643,7 +636,7 @@ export default function Dashboard() {
                           <div className="drawer-row notes-inline">
                             <span className="drawer-row-label">Agent Notes</span>
                             <span className="agent-notes">
-                              {activeTrust.risk_notes || (activePass ? "Cleared constraints." : "Flagged compliance issue.")}
+                              {activePass ? "✅" : (activeTrust.risk_notes || "Flagged compliance issue.")}
                             </span>
                           </div>
                         </div>
