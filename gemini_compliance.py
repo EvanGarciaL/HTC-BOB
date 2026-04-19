@@ -19,8 +19,7 @@ try:
         genai.configure(api_key=API_KEY)
         
     def get_model():
-        # Fallback to standard gemini-pro to avoid 404s on older google.generativeai SDKs
-        return genai.GenerativeModel("gemini-pro")
+        return genai.GenerativeModel("models/gemini-2.5-flash")
 
 except ImportError:
     # Local fallback for development without deps
@@ -84,6 +83,102 @@ def evaluate_opportunity_with_ai(product_name: str, category: str):
             "sourcing_feasibility_score": 6 if is_high_risk else 14,
             "translation_to_market_score": 13
         }
+
+import re
+
+def _is_valid_entry(s: str) -> bool:
+    return isinstance(s, str) and len(s.strip()) > 5 and "—" in s
+
+def get_competitors_and_recommendations(product_name: str, category: str) -> dict:
+    """
+    Uses Gemini to return structured competitor and product expansion insights.
+    Raises on failure — no static fallback.
+    """
+    if not genai or not os.environ.get("GEMINI_API_KEY"):
+        raise EnvironmentError("Gemini AI is not configured or GEMINI_API_KEY is missing.")
+
+    prompt = f"""
+    You are an expert sourcing executive for 'Prince of Peace' (POP), a distributor specializing in
+    Asian grocery imports, wellness products, teas, and shelf-stable goods.
+    Evaluate the following trending product:
+    Name: "{product_name}", Category: "{category}"
+    Provide your response strictly as a JSON object with EXACTLY these keys:
+    1. "competitors" (array of 3–5 strings):
+       Real brands that sell this product or a close equivalent.
+       Format: "Brand — one-sentence positioning note"
+    2. "recommendations" (array of 4–6 strings):
+       Adjacent product expansion ideas.
+       Format: "Product — one-sentence rationale tied to POP"
+    Rules:
+    - Do not include any keys other than the two specified
+    - Arrays must contain only strings
+    - No nulls, no nested objects
+    - Only include real, well-known brands (no made-up names)
+    Respond in raw JSON only.
+    """
+
+    model = get_model()
+    last_error = None
+
+    for attempt in range(2):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={"temperature": 0.3}
+            )
+
+            raw = getattr(response, "text", "") or ""
+            raw = raw.strip()
+            if not raw:
+                raise ValueError(f"Empty response from Gemini for '{product_name}'")
+
+            matches = re.findall(r"\{.*?\}", raw, re.DOTALL)
+            if not matches:
+                raise ValueError(f"No JSON object found in Gemini response for '{product_name}'")
+
+            result = None
+            for m in matches:
+                try:
+                    result = json.loads(m)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+            if result is None:
+                raise ValueError(f"[PARSE ERROR] {product_name}: no valid JSON object found")
+
+            competitors = result.get("competitors")
+            recommendations = result.get("recommendations")
+
+            if not isinstance(competitors, list) or not isinstance(recommendations, list):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: competitors or recommendations is not a list")
+
+            if not all(isinstance(x, str) for x in competitors):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: non-string value in competitors")
+            if not all(isinstance(x, str) for x in recommendations):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: non-string value in recommendations")
+
+            if not (3 <= len(competitors) <= 5):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: competitors length {len(competitors)} out of bounds (3–5)")
+            if not (4 <= len(recommendations) <= 6):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: recommendations length {len(recommendations)} out of bounds (4–6)")
+
+            if not all(_is_valid_entry(x) for x in competitors):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: malformed competitor entries")
+            if not all(_is_valid_entry(x) for x in recommendations):
+                raise ValueError(f"[VALIDATION ERROR] {product_name}: malformed recommendation entries")
+
+            return {
+                "competitors": competitors,
+                "recommendations": recommendations,
+            }
+
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                print(f"[RETRY] {product_name} attempt {attempt + 1} failed: {e}")
+
+    raise last_error
 
 if __name__ == "__main__":
     test_item = "matcha gummies"
